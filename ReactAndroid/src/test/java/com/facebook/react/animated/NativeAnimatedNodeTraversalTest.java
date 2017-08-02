@@ -261,31 +261,14 @@ public class NativeAnimatedNodeTraversalTest {
     verifyNoMoreInteractions(valueListener);
   }
 
-  @Test
-  public void testSpringAnimation() {
+  public void performSpringAnimationTestWithConfig(JavaOnlyMap config) {
     createSimpleAnimatedViewWithOpacity(1000, 0d);
 
     Callback animationCallback = mock(Callback.class);
     mNativeAnimatedNodesManager.startAnimatingNode(
       1,
       1,
-      JavaOnlyMap.of(
-        "type",
-        "spring",
-        "friction",
-        7d,
-        "tension",
-        40.0d,
-        "initialVelocity",
-        0d,
-        "toValue",
-        1d,
-        "restSpeedThreshold",
-        0.001d,
-        "restDisplacementThreshold",
-        0.001d,
-        "overshootClamping",
-        false),
+      config,
       animationCallback);
 
     ArgumentCaptor<ReactStylesDiffMap> stylesCaptor =
@@ -322,13 +305,8 @@ public class NativeAnimatedNodeTraversalTest {
   }
 
   @Test
-  public void testSpringAnimationLoopsFiveTimes() {
-    createSimpleAnimatedViewWithOpacity(1000, 0d);
-
-    Callback animationCallback = mock(Callback.class);
-    mNativeAnimatedNodesManager.startAnimatingNode(
-      1,
-      1,
+  public void testRK4SpringAnimation() {
+    performSpringAnimationTestWithConfig(
       JavaOnlyMap.of(
         "type",
         "spring",
@@ -345,9 +323,45 @@ public class NativeAnimatedNodeTraversalTest {
         "restDisplacementThreshold",
         0.001d,
         "overshootClamping",
-        false,
-        "iterations",
-        5),
+        false
+      )
+    );
+  }
+
+  @Test
+  public void testDHOSpringAnimation() {
+    performSpringAnimationTestWithConfig(
+      JavaOnlyMap.of(
+        "type",
+        "spring",
+        "stiffness",
+        100d,
+        "damping",
+        10.0d,
+        "mass",
+        1.0d,
+        "initialVelocity",
+        0d,
+        "toValue",
+        1d,
+        "restSpeedThreshold",
+        0.001d,
+        "restDisplacementThreshold",
+        0.001d,
+        "overshootClamping",
+        false
+      )
+    );
+  }
+
+  public void performSpringAnimationLoopsFiveTimesTest(JavaOnlyMap config) {
+    createSimpleAnimatedViewWithOpacity(1000, 0d);
+
+    Callback animationCallback = mock(Callback.class);
+    mNativeAnimatedNodesManager.startAnimatingNode(
+      1,
+      1,
+      config,
       animationCallback);
 
     ArgumentCaptor<ReactStylesDiffMap> stylesCaptor =
@@ -397,6 +411,60 @@ public class NativeAnimatedNodeTraversalTest {
     reset(mUIImplementationMock);
     mNativeAnimatedNodesManager.runUpdates(nextFrameTime());
     verifyNoMoreInteractions(mUIImplementationMock);
+  }
+
+  @Test
+  public void testRK4SpringAnimationLoopsFiveTimes() {
+    performSpringAnimationLoopsFiveTimesTest(
+      JavaOnlyMap.of(
+        "type",
+        "spring",
+        "friction",
+        7d,
+        "tension",
+        40.0d,
+        "initialVelocity",
+        0d,
+        "toValue",
+        1d,
+        "restSpeedThreshold",
+        0.001d,
+        "restDisplacementThreshold",
+        0.001d,
+        "overshootClamping",
+        false,
+        "iterations",
+        5
+      )
+    );
+  }
+
+  @Test
+  public void testDHOSpringAnimationLoopsFiveTimes() {
+    performSpringAnimationLoopsFiveTimesTest(
+      JavaOnlyMap.of(
+        "type",
+        "spring",
+        "stiffness",
+        100d,
+        "damping",
+        10.0d,
+        "mass",
+        1.0d,
+        "initialVelocity",
+        0d,
+        "toValue",
+        1d,
+        "restSpeedThreshold",
+        0.001d,
+        "restDisplacementThreshold",
+        0.001d,
+        "overshootClamping",
+        false,
+        "iterations",
+        5
+      )
+    );
   }
 
   @Test
