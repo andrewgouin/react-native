@@ -606,6 +606,25 @@ describe('Native Animated', () => {
         jasmine.any(Function)
       );
 
+      Animated.spring(anim, {toValue: 10, stiffness: 1000, damping: 500, mass: 3, useNativeDriver: true}).start();
+      expect(nativeAnimatedModule.startAnimatingNode).toBeCalledWith(
+        jasmine.any(Number),
+        jasmine.any(Number),
+        {
+          type: 'spring',
+          stiffness: 1000,
+          damping: 500,
+          mass: 3,
+          initialVelocity: 0,
+          overshootClamping: false,
+          restDisplacementThreshold: 0.001,
+          restSpeedThreshold: 0.001,
+          toValue: 10,
+          iterations: 1,
+        },
+        jasmine.any(Function)
+      );
+
       Animated.spring(anim, {toValue: 10, bounciness: 8, speed: 10, useNativeDriver: true}).start();
       expect(nativeAnimatedModule.startAnimatingNode).toBeCalledWith(
         jasmine.any(Number),

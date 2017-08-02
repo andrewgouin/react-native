@@ -20,12 +20,26 @@ import com.facebook.react.bridge.ReadableMap;
     double velocity;
   }
 
+  private enum SpringAnimationModel {
+    DHO, // Damped harmonic oscillator closed-form
+    RK4, // Runge-Kutta 4th order integration model
+  }
+
   private long mLastTime;
   private boolean mSpringStarted;
 
   // configuration
+  // RK4 model
   private double mSpringFriction;
   private double mSpringTension;
+  // DHO model
+  private double mSpringStiffness;
+  private double mSpringDamping;
+  private double mSpringMass;
+
+  private SpringAnimationModel mAnimationModel;
+
+  private double mInitialVelocity;
   private boolean mOvershootClampingEnabled;
 
   // all physics simulation objects are final and reused in each processing pass
@@ -44,9 +58,18 @@ import com.facebook.react.bridge.ReadableMap;
   private double mOriginalValue;
 
   SpringAnimation(ReadableMap config) {
-    mSpringFriction = config.getDouble("friction");
-    mSpringTension = config.getDouble("tension");
-    mCurrentState.velocity = config.getDouble("initialVelocity");
+    if (config.hasKey("tension")) {
+      mSpringFriction = config.getDouble("friction");
+      mSpringTension = config.getDouble("tension");
+      mAnimationModel = SpringAnimationModel.RK4;
+    } else if (config.hasKey("stiffness")) {
+      mSpringStiffness = config.getDouble("stiffness");
+      mSpringDamping = config.getDouble("damping");
+      mSpringMass = config.getDouble("mass");
+      mAnimationModel = SpringAnimationModel.DHO;
+    }
+    mInitialVelocity = config.getDouble("initialVelocity");
+    mCurrentState.velocity = mInitialVelocity;
     mEndValue = config.getDouble("toValue");
     mRestSpeedThreshold = config.getDouble("restSpeedThreshold");
     mDisplacementFromRestThreshold = config.getDouble("restDisplacementThreshold");
@@ -65,9 +88,15 @@ import com.facebook.react.bridge.ReadableMap;
       }
       mStartValue = mCurrentState.position = mAnimatedValue.mValue;
       mLastTime = frameTimeMillis;
+      mTimeAccumulator = 0.0;
       mSpringStarted = true;
     }
-    advance((frameTimeMillis - mLastTime) / 1000.0);
+    double deltaTime = (frameTimeMillis - mLastTime) / 1000.0;
+    if (mAnimationModel == SpringAnimationModel.RK4) {
+      advanceRK4(deltaTime);
+    } else {
+      advanceDHO(deltaTime);
+    }
     mLastTime = frameTimeMillis;
     mAnimatedValue.mValue = mCurrentState.position;
     if (isAtRest()) {
@@ -95,9 +124,10 @@ import com.facebook.react.bridge.ReadableMap;
    * @return is the spring at rest
    */
   private boolean isAtRest() {
+    double tensionStiffness = mAnimationModel == SpringAnimationModel.RK4 ? mSpringTension : mSpringStiffness;
     return Math.abs(mCurrentState.velocity) <= mRestSpeedThreshold &&
       (getDisplacementDistanceForState(mCurrentState) <= mDisplacementFromRestThreshold ||
-        mSpringTension == 0);
+        tensionStiffness == 0);
   }
 
   /**
@@ -120,6 +150,68 @@ import com.facebook.react.bridge.ReadableMap;
     mCurrentState.velocity = mCurrentState.velocity * alpha + mPreviousState.velocity *(1-alpha);
   }
 
+  private void advanceDHO(double realDeltaTime) {
+    if (isAtRest()) {
+      return;
+    }
+
+    // clamp the amount of realTime to simulate to avoid stuttering in the UI. We should be able
+    // to catch up in a subsequent advance if necessary.
+    double adjustedDeltaTime = realDeltaTime;
+    if (realDeltaTime > MAX_DELTA_TIME_SEC) {
+      adjustedDeltaTime = MAX_DELTA_TIME_SEC;
+    }
+
+    mTimeAccumulator += adjustedDeltaTime;
+
+    double c = mSpringDamping;
+    double m = mSpringMass;
+    double k = mSpringStiffness;
+    double v0 = mInitialVelocity;
+
+    // Assert > 0?
+
+    double zeta = c / (2 * Math.sqrt(k * m ));
+    double omega0 = Math.sqrt(k / m);
+    double omega1 = omega0 * Math.sqrt(1.0 - (zeta * zeta));
+
+    double x0 = 1;
+
+    double oscillation;
+    if (zeta < 1) {
+      // Under-damped spring
+      double envelope = Math.exp(-zeta * omega0 * mTimeAccumulator);
+      oscillation = envelope * (((v0 + zeta * omega0 * x0) / omega1) * Math.sin(omega1 * mTimeAccumulator) + (x0 * Math.cos(omega1 * mTimeAccumulator)));
+    } else {
+      // Critically damped spring
+      double envelope = Math.exp(-omega0 * mTimeAccumulator);
+      oscillation = envelope * (x0 + (v0 + (omega0 * x0)) * mTimeAccumulator);
+    }
+
+    double delta = mEndValue - mStartValue;
+    double fraction = 1 - oscillation;
+    double position = (mStartValue + fraction * delta);
+    double velocity = (position - mCurrentState.position) / adjustedDeltaTime;
+
+    mCurrentState.position = position;
+    mCurrentState.velocity = velocity;
+
+    // End the spring immediately if it is overshooting and overshoot clamping is enabled.
+    // Also make sure that if the spring was considered within a resting threshold that it's now
+    // snapped to its end value.
+    if (isAtRest() || (mOvershootClampingEnabled && isOvershooting())) {
+      // Don't call setCurrentValue because that forces a call to onSpringUpdate
+      if (mSpringStiffness > 0) {
+        mStartValue = mEndValue;
+        mCurrentState.position = mEndValue;
+      } else {
+        mEndValue = mCurrentState.position;
+        mStartValue = mEndValue;
+      }
+      mCurrentState.velocity = 0;
+    }
+  }
+
   /**
    * advance the physics simulation in SOLVER_TIMESTEP_SEC sized chunks to fulfill the required
    * realTimeDelta.
@@ -128,7 +220,7 @@ import com.facebook.react.bridge.ReadableMap;
    * @param time clock time
    * @param realDeltaTime clock drift
    */
-  private void advance(double realDeltaTime) {
+  private void advanceRK4(double realDeltaTime) {
 
     if (isAtRest()) {
       return;
