@@ -266,19 +266,12 @@ static id RCTPropChecker(NSString *prop, NSNumber *value)
   XCTAssertEqual(observer.calls.count, 7UL);
 }
 
-- (void)testSpringAnimation
+- (void)performSpringAnimationTestWithConfig:(NSDictionary*)config
 {
   [self createSimpleAnimatedView:@1000 withOpacity:0];
   [_nodesManager startAnimatingNode:@1
                             nodeTag:@1
-                             config:@{@"type": @"spring",
-                                      @"friction": @7,
-                                      @"tension": @40,
-                                      @"initialVelocity": @0,
-                                      @"toValue": @1,
-                                      @"restSpeedThreshold": @0.001,
-                                      @"restDisplacementThreshold": @0.001,
-                                      @"overshootClamping": @NO}
+                             config:config
                         endCallback:nil];
 
   BOOL wasGreaterThanOne = NO;
@@ -313,6 +306,31 @@ static id RCTPropChecker(NSString *prop, NSNumber *value)
   [[_uiManager reject] synchronouslyUpdateViewOnUIThread:OCMOCK_ANY viewName:OCMOCK_ANY props:OCMOCK_ANY];
   [_nodesManager stepAnimations:_displayLink];
   [_uiManager verify];
+}
+
+- (void)testRK4SpringAnimation
+{
+  [self performSpringAnimationTestWithConfig:@{@"type": @"spring",
+                                               @"friction": @7,
+                                               @"tension": @40,
+                                               @"initialVelocity": @0,
+                                               @"toValue": @1,
+                                               @"restSpeedThreshold": @0.001,
+                                               @"restDisplacementThreshold": @0.001,
+                                               @"overshootClamping": @NO}];
+}
+
+- (void)testDHOSpringAnimation
+{
+  [self performSpringAnimationTestWithConfig:@{@"type": @"spring",
+                                               @"stiffness": @100,
+                                               @"damping": @10,
+                                               @"mass": @1,
+                                               @"initialVelocity": @0,
+                                               @"toValue": @1,
+                                               @"restSpeedThreshold": @0.001,
+                                               @"restDisplacementThreshold": @0.001,
+                                               @"overshootClamping": @NO}];
 }
 
 - (void)testDecayAnimation
@@ -408,20 +426,12 @@ static id RCTPropChecker(NSString *prop, NSNumber *value)
   [_uiManager verify];
 }
 
-- (void)testSpringAnimationLoop
+- (void)performSpringAnimationLoopTestWithConfig:(NSDictionary*)config
 {
   [self createSimpleAnimatedView:@1000 withOpacity:0];
   [_nodesManager startAnimatingNode:@1
                             nodeTag:@1
-                             config:@{@"type": @"spring",
-                                      @"iterations": @5,
-                                      @"friction": @7,
-                                      @"tension": @40,
-                                      @"initialVelocity": @0,
-                                      @"toValue": @1,
-                                      @"restSpeedThreshold": @0.001,
-                                      @"restDisplacementThreshold": @0.001,
-                                      @"overshootClamping": @NO}
+                             config:config
                         endCallback:nil];
 
   BOOL didComeToRest = NO;
@@ -462,6 +472,33 @@ static id RCTPropChecker(NSString *prop, NSNumber *value)
   [[_uiManager reject] synchronouslyUpdateViewOnUIThread:OCMOCK_ANY viewName:OCMOCK_ANY props:OCMOCK_ANY];
   [_nodesManager stepAnimations:_displayLink];
   [_uiManager verify];
+}
+
+- (void)testRK4SpringAnimationLoop
+{
+  [self performSpringAnimationLoopTestWithConfig:@{@"type": @"spring",
+                                                   @"iterations": @5,
+                                                   @"friction": @7,
+                                                   @"tension": @40,
+                                                   @"initialVelocity": @0,
+                                                   @"toValue": @1,
+                                                   @"restSpeedThreshold": @0.001,
+                                                   @"restDisplacementThreshold": @0.001,
+                                                   @"overshootClamping": @NO}];
+}
+
+- (void)testDHOSpringAnimationLoop
+{
+  [self performSpringAnimationLoopTestWithConfig:@{@"type": @"spring",
+                                                   @"iterations": @5,
+                                                   @"stiffness": @100,
+                                                   @"damping": @10,
+                                                   @"mass": @1,
+                                                   @"initialVelocity": @0,
+                                                   @"toValue": @1,
+                                                   @"restSpeedThreshold": @0.001,
+                                                   @"restDisplacementThreshold": @0.001,
+                                                   @"overshootClamping": @NO}];
 }
 
 - (void)testAnimationCallbackFinish
