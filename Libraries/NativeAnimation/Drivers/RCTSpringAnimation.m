@@ -116,6 +116,7 @@ RCT_NOT_IMPLEMENTED(- (instancetype)init)
     _animationStartTime = currentTime;
     deltaTime = 0.0;
   } else {
+    // Handle frame drops, and only advance dt by a max of MAX_DELTA_TIME
     deltaTime = MIN(MAX_DELTA_TIME, currentTime - _animationCurrentTime);
     _t = _t + deltaTime;
   }
