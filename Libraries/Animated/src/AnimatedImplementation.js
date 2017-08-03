@@ -488,11 +488,6 @@ function withDefault<T>(value: ?T, defaultValue: T): T {
   return value;
 }
 
-// Animation model can be Runge-Kutta 4th order approximation
-// or rely on the closed form of the damped harmonic oscillating spring
-// equation.
-type SpringAnimationModel = 'RK4' | 'DHO';
-
 class SpringAnimation extends Animation {
   _overshootClamping: bool;
   _restDisplacementThreshold: number;
@@ -503,12 +498,9 @@ class SpringAnimation extends Animation {
   _lastPosition: number;
   _fromValue: number;
   _toValue: any;
-  _tension: ?number;
-  _friction: ?number;
   _stiffness: ?number;
   _damping: ?number;
   _mass: ?number;
-  _animationModel: SpringAnimationModel;
   _delay: number;
   _timeout: any;
   _startTime: number;
@@ -526,7 +518,7 @@ class SpringAnimation extends Animation {
     this._overshootClamping = withDefault(config.overshootClamping, false);
     this._restDisplacementThreshold = withDefault(config.restDisplacementThreshold, 0.001);
     this._restSpeedThreshold = withDefault(config.restSpeedThreshold, 0.001);
-    this._initialVelocity = config.velocity;
+    this._initialVelocity = withDefault(config.velocity, 0);
     this._lastVelocity = withDefault(config.velocity, 0);
     this._toValue = config.toValue;
     this._delay = withDefault(config.delay, 0);
@@ -535,7 +527,6 @@ class SpringAnimation extends Animation {
     this.__iterations = config.iterations !== undefined ? config.iterations : 1;
 
     if (config.stiffness !== undefined || config.damping !== undefined || config.mass !== undefined) {
-      // Use the damped harmonic spring model
       invariant(
         config.bounciness === undefined && config.speed === undefined &&
         config.tension === undefined && config.friction === undefined,
@@ -544,9 +535,9 @@ class SpringAnimation extends Animation {
       this._stiffness = withDefault(config.stiffness, 100);
       this._damping = withDefault(config.damping, 10);
       this._mass = withDefault(config.mass, 1);
-      this._animationModel = 'DHO';
     } else if (config.bounciness !== undefined || config.speed !== undefined) {
-      // Use the RK4 integration model with bounciness/speed
+      // Convert the origami bounciness/speed values to stiffness/damping
+      // We assume mass is 1.
       invariant(
         config.tension === undefined && config.friction === undefined &&
         config.stiffness === undefined && config.damping === undefined &&
@@ -557,18 +548,19 @@ class SpringAnimation extends Animation {
         withDefault(config.bounciness, 8),
         withDefault(config.speed, 12),
       );
-      this._tension = springConfig.tension;
-      this._friction = springConfig.friction;
-      this._animationModel = 'RK4';
+      this._stiffness = springConfig.stiffness;
+      this._damping = springConfig.damping;
+      this._mass = 1;
     } else {
-      // Use the RK4 integration model with tension/friction
+      // Convert the origami tension/friction values to stiffness/damping
+      // We assume mass is 1.
       var springConfig = SpringConfig.fromOrigamiTensionAndFriction(
         withDefault(config.tension, 40),
         withDefault(config.friction, 7),
       );
-      this._tension = springConfig.tension;
-      this._friction = springConfig.friction;
-      this._animationModel = 'RK4';
+      this._stiffness = springConfig.stiffness;
+      this._damping = springConfig.damping;
+      this._mass = 1;
     }
   }
 
@@ -578,8 +570,6 @@ class SpringAnimation extends Animation {
       overshootClamping: this._overshootClamping,
       restDisplacementThreshold: this._restDisplacementThreshold,
       restSpeedThreshold: this._restSpeedThreshold,
-      tension: this._tension,
-      friction: this._friction,
       stiffness: this._stiffness,
       damping: this._damping,
       mass: this._mass,
@@ -609,6 +599,8 @@ class SpringAnimation extends Animation {
       var internalState = previousAnimation.getInternalState();
       this._lastPosition = internalState.lastPosition;
       this._lastVelocity = internalState.lastVelocity;
+      // Set the initial velocity to the last velocity
+      this._initialVelocity = this._lastVelocity;
       this._lastTime = internalState.lastTime;
     }
     if (this._initialVelocity !== undefined &&
@@ -640,26 +632,13 @@ class SpringAnimation extends Animation {
     };
   }
 
-  onUpdate(): void {
-    if (this._animationModel === 'RK4') {
-      if (this._onUpdateRK4()) {
-        return;
-      }
-    } else if (this._animationModel === 'DHO') {
-      if (this._onUpdateDHO()) {
-        return;
-      }
-    }
-    this._animationFrame = requestAnimationFrame(this.onUpdate.bind(this));
-  }
-
   /**
    * This spring model is based off of a damped harmonic oscillator
    * (https://en.wikipedia.org/wiki/Harmonic_oscillator#Damped_harmonic_oscillator).
    *
    * We use the closed form of the second order differential equation:
    *
-   * x'' + 2ζ⍵_0 + ⍵^2x = 0
+   * x'' + (2ζ⍵_0)x' + ⍵^2x = 0
    *
    * where
    *    ⍵_0 = √(k / m) (undamped angular frequency of the oscillator),
@@ -674,7 +653,7 @@ class SpringAnimation extends Animation {
    * This algorithm happens to match the algorithm used by CASpringAnimation,
    * a QuartzCore (iOS) API that creates spring animations.
    */
-  _onUpdateDHO(): boolean {
+  onUpdate(): void {
     // If for some reason we lost a lot of frames (e.g. process large payload or
     // stopped in the debugger), we only advance by 4 frames worth of
     // computation and will continue on the next frame. It's better to have it
@@ -706,29 +685,34 @@ class SpringAnimation extends Animation {
     var x0 = 1; // calculate the oscillation from x0 = 1 to x = 0
 
     var oscillation = 0.0;
+    var velocity = 0.0;
+    var t = this._frameTime;
     if (zeta < 1) {
       // Under damped
-      var envelope = Math.exp(-zeta * omega0 * this._frameTime);
-      oscillation = envelope * (((v0 + zeta * omega0 * x0) / omega1) * Math.sin(omega1 * this._frameTime) + (x0 * Math.cos(omega1 * this._frameTime)));
+      var envelope = Math.exp(-zeta * omega0 * t);
+      oscillation = envelope * (((v0 + zeta * omega0 * x0) / omega1) * Math.sin(omega1 * t) + (x0 * Math.cos(omega1 * t)));
+      // This looks crazy -- it's actually just the derivative of the oscillation function
+      velocity = (envelope * ((Math.cos(omega1 * t) * (v0 + zeta * omega0 * x0)) - (omega1 * x0 * Math.sin(omega1 * t))) -
+        ((zeta * omega0 * envelope) * ((((Math.sin(omega1 * t) * (v0 + zeta * omega0 * x0)) ) / omega1) + (x0 * Math.cos(omega1 * t)))));
     } else {
       // Critically damped
-      var envelope = Math.exp(-omega0 * this._frameTime);
-      oscillation = envelope * (x0 + (v0 + (omega0 * x0)) * this._frameTime);
+      var envelope = Math.exp(-omega0 * t);
+      oscillation = envelope * (x0 + (v0 + (omega0 * x0)) * t);
+      velocity = envelope * ((t * v0 * omega0) - (t * x0 * (omega0 * omega0)) + v0);
     }
 
     var delta = this._toValue - this._startPosition;
     var fraction = 1 - oscillation;
     var position = this._startPosition + fraction * delta;
 
+    this._lastTime = now;
+    this._lastPosition = position;
+    this._lastVelocity = velocity;
+
     this._onUpdate(position);
     if (!this.__active) { // a listener might have stopped us in _onUpdate
-      return true;
+      return;
     }
-
-    var velocity = deltaTime > 0 ? (position - this._lastPosition) / deltaTime : 0;
-    this._lastVelocity = velocity;
-    this._lastPosition = position;
-    this._lastTime = now;
 
     // Conditions for stopping the spring animation
     var isOvershooting = false;
@@ -752,111 +736,9 @@ class SpringAnimation extends Animation {
       }
 
       this.__debouncedOnEnd({finished: true});
-      return true;
+      return;
     }
-    return false;
-  }
-
-  _onUpdateRK4(): boolean {
-    var position = this._lastPosition;
-    var velocity = this._lastVelocity;
-
-    var tempPosition = this._lastPosition;
-    var tempVelocity = this._lastVelocity;
-
-    var tension = this._tension || 0;
-    var friction = this._friction || 0;
-
-    invariant(tension > 0, 'Tension value must be greater than 0');
-    invariant(friction > 0, 'Friction value must be greater than 0');
-
-    // If for some reason we lost a lot of frames (e.g. process large payload or
-    // stopped in the debugger), we only advance by 4 frames worth of
-    // computation and will continue on the next frame. It's better to have it
-    // running at faster speed than jumping to the end.
-    var MAX_STEPS = 64;
-    var now = Date.now();
-    if (now > this._lastTime + MAX_STEPS) {
-      now = this._lastTime + MAX_STEPS;
-    }
-
-    // We are using a fixed time step and a maximum number of iterations.
-    // The following post provides a lot of thoughts into how to build this
-    // loop: http://gafferongames.com/game-physics/fix-your-timestep/
-    var TIMESTEP_MSEC = 1;
-    var numSteps = Math.floor((now - this._lastTime) / TIMESTEP_MSEC);
-
-    for (var i = 0; i < numSteps; ++i) {
-      // Velocity is based on seconds instead of milliseconds
-      var step = TIMESTEP_MSEC / 1000;
-
-      // This is using RK4. A good blog post to understand how it works:
-      // http://gafferongames.com/game-physics/integration-basics/
-      var aVelocity = velocity;
-      var aAcceleration = tension *
-        (this._toValue - tempPosition) - friction * tempVelocity;
-      var tempPosition = position + aVelocity * step / 2;
-      var tempVelocity = velocity + aAcceleration * step / 2;
-
-      var bVelocity = tempVelocity;
-      var bAcceleration = tension *
-        (this._toValue - tempPosition) - friction * tempVelocity;
-      tempPosition = position + bVelocity * step / 2;
-      tempVelocity = velocity + bAcceleration * step / 2;
-
-      var cVelocity = tempVelocity;
-      var cAcceleration = tension *
-        (this._toValue - tempPosition) - friction * tempVelocity;
-      tempPosition = position + cVelocity * step / 2;
-      tempVelocity = velocity + cAcceleration * step / 2;
-
-      var dVelocity = tempVelocity;
-      var dAcceleration = tension *
-        (this._toValue - tempPosition) - friction * tempVelocity;
-      tempPosition = position + cVelocity * step / 2;
-      tempVelocity = velocity + cAcceleration * step / 2;
-
-      var dxdt = (aVelocity + 2 * (bVelocity + cVelocity) + dVelocity) / 6;
-      var dvdt = (aAcceleration + 2 * (bAcceleration + cAcceleration) + dAcceleration) / 6;
-
-      position += dxdt * step;
-      velocity += dvdt * step;
-    }
-
-    this._lastTime = now;
-    this._lastPosition = position;
-    this._lastVelocity = velocity;
-
-    this._onUpdate(position);
-    if (!this.__active) { // a listener might have stopped us in _onUpdate
-      return true;
-    }
-
-    // Conditions for stopping the spring animation
-    var isOvershooting = false;
-    if (this._overshootClamping && this._tension !== 0) {
-      if (this._startPosition < this._toValue) {
-        isOvershooting = position > this._toValue;
-      } else {
-        isOvershooting = position < this._toValue;
-      }
-    }
-    var isVelocity = Math.abs(velocity) <= this._restSpeedThreshold;
-    var isDisplacement = true;
-    if (this._tension !== 0) {
-      isDisplacement = Math.abs(this._toValue - position) <= this._restDisplacementThreshold;
-    }
-
-    if (isOvershooting || (isVelocity && isDisplacement)) {
-      if (this._tension !== 0) {
-        // Ensure that we end up with a round value
-        this._onUpdate(this._toValue);
-      }
-
-      this.__debouncedOnEnd({finished: true});
-      return true;
-    }
-    return false;
+    this._animationFrame = requestAnimationFrame(this.onUpdate.bind(this));
   }
 
   stop(): void {
@@ -2925,8 +2807,7 @@ module.exports = {
    */
   timing,
   /**
-   * Animates a value according to either an integrated spring model or an
-   * analytical spring model based on
+   * Animates a value according to an analytical spring model based on
    * [damped harmonic oscillation](https://en.wikipedia.org/wiki/Harmonic_oscillator#Damped_harmonic_oscillator).
    * Tracks velocity state to create fluid motions as the `toValue` updates, and
    * can be chained together.
@@ -2936,10 +2817,9 @@ module.exports = {
    * Note that you can only define one of bounciness/speed, tension/friction, or
    * stiffness/damping/mass, but not more than one:
    *
-   * The friction/tension or bounciness/speed options use an integrated model of
-   * the phyisical spring equations to calculate the current animation position.
-   * This model matches the spring model in [Facebook Pop](https://github.com/facebook/pop),
-   * [Rebound](http://facebook.github.io/rebound/), and [Origami](http://origami.design/).
+   * The friction/tension or bounciness/speed options match the spring model in
+   * [Facebook Pop](https://github.com/facebook/pop), [Rebound](http://facebook.github.io/rebound/),
+   * and [Origami](http://origami.design/).
    *
    *   - `friction`: Controls "bounciness"/overshoot.  Default 7.
    *   - `tension`: Controls speed.  Default 40.

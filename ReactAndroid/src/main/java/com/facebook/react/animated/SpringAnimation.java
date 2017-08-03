@@ -20,32 +20,18 @@ import com.facebook.react.bridge.ReadableMap;
     double velocity;
   }
 
-  private enum SpringAnimationModel {
-    DHO, // Damped harmonic oscillator closed-form
-    RK4, // Runge-Kutta 4th order integration model
-  }
-
   private long mLastTime;
   private boolean mSpringStarted;
 
   // configuration
-  // RK4 model
-  private double mSpringFriction;
-  private double mSpringTension;
-  // DHO model
   private double mSpringStiffness;
   private double mSpringDamping;
   private double mSpringMass;
-
-  private SpringAnimationModel mAnimationModel;
-
   private double mInitialVelocity;
   private boolean mOvershootClampingEnabled;
 
   // all physics simulation objects are final and reused in each processing pass
   private final PhysicsState mCurrentState = new PhysicsState();
-  private final PhysicsState mPreviousState = new PhysicsState();
-  private final PhysicsState mTempState = new PhysicsState();
   private double mStartValue;
   private double mEndValue;
   // thresholds for determining when the spring is at rest
@@ -58,16 +44,9 @@ import com.facebook.react.bridge.ReadableMap;
   private double mOriginalValue;
 
   SpringAnimation(ReadableMap config) {
-    if (config.hasKey("tension")) {
-      mSpringFriction = config.getDouble("friction");
-      mSpringTension = config.getDouble("tension");
-      mAnimationModel = SpringAnimationModel.RK4;
-    } else if (config.hasKey("stiffness")) {
-      mSpringStiffness = config.getDouble("stiffness");
-      mSpringDamping = config.getDouble("damping");
-      mSpringMass = config.getDouble("mass");
-      mAnimationModel = SpringAnimationModel.DHO;
-    }
+    mSpringStiffness = config.getDouble("stiffness");
+    mSpringDamping = config.getDouble("damping");
+    mSpringMass = config.getDouble("mass");
     mInitialVelocity = config.getDouble("initialVelocity");
     mCurrentState.velocity = mInitialVelocity;
     mEndValue = config.getDouble("toValue");
@@ -91,12 +70,7 @@ import com.facebook.react.bridge.ReadableMap;
       mTimeAccumulator = 0.0;
       mSpringStarted = true;
     }
-    double deltaTime = (frameTimeMillis - mLastTime) / 1000.0;
-    if (mAnimationModel == SpringAnimationModel.RK4) {
-      advanceRK4(deltaTime);
-    } else {
-      advanceDHO(deltaTime);
-    }
+    advance((frameTimeMillis - mLastTime) / 1000.0);
     mLastTime = frameTimeMillis;
     mAnimatedValue.mValue = mCurrentState.position;
     if (isAtRest()) {
@@ -124,10 +98,9 @@ import com.facebook.react.bridge.ReadableMap;
    * @return is the spring at rest
    */
   private boolean isAtRest() {
-    double tensionStiffness = mAnimationModel == SpringAnimationModel.RK4 ? mSpringTension : mSpringStiffness;
     return Math.abs(mCurrentState.velocity) <= mRestSpeedThreshold &&
       (getDisplacementDistanceForState(mCurrentState) <= mDisplacementFromRestThreshold ||
-        tensionStiffness == 0);
+        mSpringStiffness == 0);
   }
 
   /**
@@ -135,22 +108,12 @@ import com.facebook.react.bridge.ReadableMap;
    * @return true if the spring is overshooting its target
    */
   private boolean isOvershooting() {
-    return mSpringTension > 0 &&
+    return mSpringStiffness > 0 &&
       ((mStartValue < mEndValue && mCurrentState.position > mEndValue) ||
         (mStartValue > mEndValue && mCurrentState.position < mEndValue));
   }
 
-  /**
-   * linear interpolation between the previous and current physics state based on the amount of
-   * timestep remaining after processing the rendering delta time in timestep sized chunks.
-   * @param alpha from 0 to 1, where 0 is the previous state, 1 is the current state
-   */
-  private void interpolate(double alpha) {
-    mCurrentState.position = mCurrentState.position * alpha + mPreviousState.position *(1-alpha);
-    mCurrentState.velocity = mCurrentState.velocity * alpha + mPreviousState.velocity *(1-alpha);
-  }
-
-  private void advanceDHO(double realDeltaTime) {
+  private void advance(double realDeltaTime) {
     if (isAtRest()) {
       return;
     }
@@ -169,31 +132,31 @@ import com.facebook.react.bridge.ReadableMap;
     double k = mSpringStiffness;
     double v0 = mInitialVelocity;
 
-    // Assert > 0?
-
     double zeta = c / (2 * Math.sqrt(k * m ));
     double omega0 = Math.sqrt(k / m);
     double omega1 = omega0 * Math.sqrt(1.0 - (zeta * zeta));
-
     double x0 = 1;
 
+    double velocity;
     double oscillation;
+    double t = mTimeAccumulator;
     if (zeta < 1) {
       // Under-damped spring
-      double envelope = Math.exp(-zeta * omega0 * mTimeAccumulator);
-      oscillation = envelope * (((v0 + zeta * omega0 * x0) / omega1) * Math.sin(omega1 * mTimeAccumulator) + (x0 * Math.cos(omega1 * mTimeAccumulator)));
+      double envelope = Math.exp(-zeta * omega0 * t);
+      oscillation = envelope * (((v0 + zeta * omega0 * x0) / omega1) * Math.sin(omega1 * t) + (x0 * Math.cos(omega1 * t)));
+      velocity = (envelope * ((Math.cos(omega1 * t) * (v0 + zeta * omega0 * x0)) - (omega1 * x0 * Math.sin(omega1 * t))) -
+        ((zeta * omega0 * envelope) * ((((Math.sin(omega1 * t) * (v0 + zeta * omega0 * x0)) ) / omega1) + (x0 * Math.cos(omega1 * t)))));
     } else {
       // Critically damped spring
-      double envelope = Math.exp(-omega0 * mTimeAccumulator);
-      oscillation = envelope * (x0 + (v0 + (omega0 * x0)) * mTimeAccumulator);
+      double envelope = Math.exp(-omega0 * t);
+      oscillation = envelope * (x0 + (v0 + (omega0 * x0)) * t);
+      velocity = envelope * ((t * v0 * omega0) - (t * x0 * (omega0 * omega0)) + v0);
     }
 
     double delta = mEndValue - mStartValue;
     double fraction = 1 - oscillation;
-    double position = (mStartValue + fraction * delta);
-    double velocity = (position - mCurrentState.position) / adjustedDeltaTime;
 
-    mCurrentState.position = position;
+    mCurrentState.position = mStartValue + fraction * delta;
     mCurrentState.velocity = velocity;
 
     // End the spring immediately if it is overshooting and overshoot clamping is enabled.
@@ -202,120 +165,6 @@ import com.facebook.react.bridge.ReadableMap;
     if (isAtRest() || (mOvershootClampingEnabled && isOvershooting())) {
       // Don't call setCurrentValue because that forces a call to onSpringUpdate
       if (mSpringStiffness > 0) {
-        mStartValue = mEndValue;
-        mCurrentState.position = mEndValue;
-      } else {
-        mEndValue = mCurrentState.position;
-        mStartValue = mEndValue;
-      }
-      mCurrentState.velocity = 0;
-    }
-  }
-
-  /**
-   * advance the physics simulation in SOLVER_TIMESTEP_SEC sized chunks to fulfill the required
-   * realTimeDelta.
-   * The math is inlined inside the loop since it made a huge performance impact when there are
-   * several springs being advanced.
-   * @param time clock time
-   * @param realDeltaTime clock drift
-   */
-  private void advanceRK4(double realDeltaTime) {
-
-    if (isAtRest()) {
-      return;
-    }
-
-    // clamp the amount of realTime to simulate to avoid stuttering in the UI. We should be able
-    // to catch up in a subsequent advance if necessary.
-    double adjustedDeltaTime = realDeltaTime;
-    if (realDeltaTime > MAX_DELTA_TIME_SEC) {
-      adjustedDeltaTime = MAX_DELTA_TIME_SEC;
-    }
-
-    mTimeAccumulator += adjustedDeltaTime;
-
-    double tension = mSpringTension;
-    double friction = mSpringFriction;
-
-    double position = mCurrentState.position;
-    double velocity = mCurrentState.velocity;
-    double tempPosition = mTempState.position;
-    double tempVelocity = mTempState.velocity;
-
-    double aVelocity, aAcceleration;
-    double bVelocity, bAcceleration;
-    double cVelocity, cAcceleration;
-    double dVelocity, dAcceleration;
-
-    double dxdt, dvdt;
-
-    // iterate over the true time
-    while (mTimeAccumulator >= SOLVER_TIMESTEP_SEC) {
-      /* begin debug
-      iterations++;
-      end debug */
-      mTimeAccumulator -= SOLVER_TIMESTEP_SEC;
-
-      if (mTimeAccumulator < SOLVER_TIMESTEP_SEC) {
-        // This will be the last iteration. Remember the previous state in case we need to
-        // interpolate
-        mPreviousState.position = position;
-        mPreviousState.velocity = velocity;
-      }
-
-      // Perform an RK4 integration to provide better detection of the acceleration curve via
-      // sampling of Euler integrations at 4 intervals feeding each derivative into the calculation
-      // of the next and taking a weighted sum of the 4 derivatives as the final output.
-
-      // This math was inlined since it made for big performance improvements when advancing several
-      // springs in one pass of the BaseSpringSystem.
-
-      // The initial derivative is based on the current velocity and the calculated acceleration
-      aVelocity = velocity;
-      aAcceleration = (tension * (mEndValue - tempPosition)) - friction * velocity;
-
-      // Calculate the next derivatives starting with the last derivative and integrating over the
-      // timestep
-      tempPosition = position + aVelocity * SOLVER_TIMESTEP_SEC * 0.5;
-      tempVelocity = velocity + aAcceleration * SOLVER_TIMESTEP_SEC * 0.5;
-      bVelocity = tempVelocity;
-      bAcceleration = (tension * (mEndValue - tempPosition)) - friction * tempVelocity;
-
-      tempPosition = position + bVelocity * SOLVER_TIMESTEP_SEC * 0.5;
-      tempVelocity = velocity + bAcceleration * SOLVER_TIMESTEP_SEC * 0.5;
-      cVelocity = tempVelocity;
-      cAcceleration = (tension * (mEndValue - tempPosition)) - friction * tempVelocity;
-
-      tempPosition = position + cVelocity * SOLVER_TIMESTEP_SEC;
-      tempVelocity = velocity + cAcceleration * SOLVER_TIMESTEP_SEC;
-      dVelocity = tempVelocity;
-      dAcceleration = (tension * (mEndValue - tempPosition)) - friction * tempVelocity;
-
-      // Take the weighted sum of the 4 derivatives as the final output.
-      dxdt = 1.0/6.0 * (aVelocity + 2.0 * (bVelocity + cVelocity) + dVelocity);
-      dvdt = 1.0/6.0 * (aAcceleration + 2.0 * (bAcceleration + cAcceleration) + dAcceleration);
-
-      position += dxdt * SOLVER_TIMESTEP_SEC;
-      velocity += dvdt * SOLVER_TIMESTEP_SEC;
-    }
-
-    mTempState.position = tempPosition;
-    mTempState.velocity = tempVelocity;
-
-    mCurrentState.position = position;
-    mCurrentState.velocity = velocity;
-
-    if (mTimeAccumulator > 0) {
-      interpolate(mTimeAccumulator / SOLVER_TIMESTEP_SEC);
-    }
-
-    // End the spring immediately if it is overshooting and overshoot clamping is enabled.
-    // Also make sure that if the spring was considered within a resting threshold that it's now
-    // snapped to its end value.
-    if (isAtRest() || (mOvershootClampingEnabled && isOvershooting())) {
-      // Don't call setCurrentValue because that forces a call to onSpringUpdate
-      if (tension > 0) {
         mStartValue = mEndValue;
         mCurrentState.position = mEndValue;
       } else {
