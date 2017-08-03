@@ -261,7 +261,7 @@ public class NativeAnimatedNodeTraversalTest {
     verifyNoMoreInteractions(valueListener);
   }
 
-  public void performSpringAnimationTestWithConfig(JavaOnlyMap config) {
+  public void performSpringAnimationTestWithConfig(JavaOnlyMap config, Boolean testForCriticallyDamped) {
     createSimpleAnimatedViewWithOpacity(1000, 0d);
 
     Callback animationCallback = mock(Callback.class);
@@ -292,54 +292,34 @@ public class NativeAnimatedNodeTraversalTest {
         wasGreaterThanOne = true;
       }
       // verify that animation step is relatively small
-      assertThat(Math.abs(currentValue - previousValue)).isLessThan(0.1d);
+      assertThat(Math.abs(currentValue - previousValue)).isLessThan(0.12d);
       previousValue = currentValue;
     }
     // verify that we've reach the final value at the end of animation
     assertThat(previousValue).isEqualTo(1d);
     // verify that value has reached some maximum value that is greater than the final value (bounce)
-    assertThat(wasGreaterThanOne);
+    if (testForCriticallyDamped) {
+      assertThat(!wasGreaterThanOne);
+    } else {
+      assertThat(wasGreaterThanOne);
+    }
     reset(mUIImplementationMock);
     mNativeAnimatedNodesManager.runUpdates(nextFrameTime());
     verifyNoMoreInteractions(mUIImplementationMock);
   }
 
   @Test
-  public void testRK4SpringAnimation() {
-    performSpringAnimationTestWithConfig(
-      JavaOnlyMap.of(
-        "type",
-        "spring",
-        "friction",
-        7d,
-        "tension",
-        40.0d,
-        "initialVelocity",
-        0d,
-        "toValue",
-        1d,
-        "restSpeedThreshold",
-        0.001d,
-        "restDisplacementThreshold",
-        0.001d,
-        "overshootClamping",
-        false
-      )
-    );
-  }
-
-  @Test
-  public void testDHOSpringAnimation() {
+  public void testUnderdampedSpringAnimation() {
     performSpringAnimationTestWithConfig(
       JavaOnlyMap.of(
         "type",
         "spring",
         "stiffness",
-        100d,
+        230.2d,
         "damping",
-        10.0d,
+        22d,
         "mass",
-        1.0d,
+        1d,
         "initialVelocity",
         0d,
         "toValue",
@@ -350,18 +330,68 @@ public class NativeAnimatedNodeTraversalTest {
         0.001d,
         "overshootClamping",
         false
-      )
+      ),
+      false
     );
   }
 
-  public void performSpringAnimationLoopsFiveTimesTest(JavaOnlyMap config) {
+  @Test
+  public void testCriticallyDampedSpringAnimation() {
+    performSpringAnimationTestWithConfig(
+      JavaOnlyMap.of(
+        "type",
+        "spring",
+        "stiffness",
+        1000d,
+        "damping",
+        500d,
+        "mass",
+        3.0d,
+        "initialVelocity",
+        0d,
+        "toValue",
+        1d,
+        "restSpeedThreshold",
+        0.001d,
+        "restDisplacementThreshold",
+        0.001d,
+        "overshootClamping",
+        false
+      ),
+      true
+    );
+  }
+
+  @Test
+  public void testSpringAnimationLoopsFiveTimes() {
     createSimpleAnimatedViewWithOpacity(1000, 0d);
 
     Callback animationCallback = mock(Callback.class);
     mNativeAnimatedNodesManager.startAnimatingNode(
       1,
       1,
-      config,
+      JavaOnlyMap.of(
+        "type",
+        "spring",
+        "stiffness",
+        230.2d,
+        "damping",
+        22d,
+        "mass",
+        1d,
+        "initialVelocity",
+        0d,
+        "toValue",
+        1d,
+        "restSpeedThreshold",
+        0.001d,
+        "restDisplacementThreshold",
+        0.001d,
+        "overshootClamping",
+        false,
+        "iterations",
+        5
+      ),
       animationCallback);
 
     ArgumentCaptor<ReactStylesDiffMap> stylesCaptor =
@@ -394,7 +424,7 @@ public class NativeAnimatedNodeTraversalTest {
       }
 
       // verify that an animation step is relatively small, unless it has come to rest and reset
-      if (!didComeToRest) assertThat(Math.abs(currentValue - previousValue)).isLessThan(0.1d);
+      if (!didComeToRest) assertThat(Math.abs(currentValue - previousValue)).isLessThan(0.12d);
 
 
        // record that the animation did come to rest when it rests on toValue
@@ -411,60 +441,6 @@ public class NativeAnimatedNodeTraversalTest {
     reset(mUIImplementationMock);
     mNativeAnimatedNodesManager.runUpdates(nextFrameTime());
     verifyNoMoreInteractions(mUIImplementationMock);
-  }
-
-  @Test
-  public void testRK4SpringAnimationLoopsFiveTimes() {
-    performSpringAnimationLoopsFiveTimesTest(
-      JavaOnlyMap.of(
-        "type",
-        "spring",
-        "friction",
-        7d,
-        "tension",
-        40.0d,
-        "initialVelocity",
-        0d,
-        "toValue",
-        1d,
-        "restSpeedThreshold",
-        0.001d,
-        "restDisplacementThreshold",
-        0.001d,
-        "overshootClamping",
-        false,
-        "iterations",
-        5
-      )
-    );
-  }
-
-  @Test
-  public void testDHOSpringAnimationLoopsFiveTimes() {
-    performSpringAnimationLoopsFiveTimesTest(
-      JavaOnlyMap.of(
-        "type",
-        "spring",
-        "stiffness",
-        100d,
-        "damping",
-        10.0d,
-        "mass",
-        1.0d,
-        "initialVelocity",
-        0d,
-        "toValue",
-        1d,
-        "restSpeedThreshold",
-        0.001d,
-        "restDisplacementThreshold",
-        0.001d,
-        "overshootClamping",
-        false,
-        "iterations",
-        5
-      )
-    );
   }
 
   @Test
