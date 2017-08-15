@@ -707,10 +707,18 @@ static UIImage *RCTResizeImageIfNeeded(UIImage *image,
     CGSize size;
     if ([imageOrData isKindOfClass:[NSData class]]) {
       NSDictionary *meta = RCTGetImageMetadata(imageOrData);
-      size = (CGSize){
-        [meta[(id)kCGImagePropertyPixelWidth] doubleValue],
-        [meta[(id)kCGImagePropertyPixelHeight] doubleValue],
-      };
+      double orientation = [meta[(id)kCGImagePropertyOrientation] doubleValue];
+      if (orientation == 1) {
+        size = (CGSize){
+          [meta[(id)kCGImagePropertyPixelWidth] doubleValue],
+          [meta[(id)kCGImagePropertyPixelHeight] doubleValue],
+        };
+      } else {
+        size = (CGSize){
+          [meta[(id)kCGImagePropertyPixelHeight] doubleValue],
+          [meta[(id)kCGImagePropertyPixelWidth] doubleValue],
+        };
+      }
     } else {
       UIImage *image = imageOrData;
       size = (CGSize){
