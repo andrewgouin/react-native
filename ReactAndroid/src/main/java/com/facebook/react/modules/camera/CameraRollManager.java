@@ -73,23 +73,31 @@ public class CameraRollManager extends ReactContextBaseJavaModule {
   static {
     if (IS_JELLY_BEAN_OR_LATER) {
       PROJECTION = new String[] {
-          Images.Media._ID,
-          Images.Media.MIME_TYPE,
-          Images.Media.BUCKET_DISPLAY_NAME,
-          Images.Media.DATE_TAKEN,
-          Images.Media.WIDTH,
-          Images.Media.HEIGHT,
-          Images.Media.LONGITUDE,
-          Images.Media.LATITUDE
+        MediaStore.Files.FileColumns._ID,
+        MediaStore.Files.FileColumns.DATA,
+        MediaStore.Files.FileColumns.DATE_ADDED,
+        MediaStore.Files.FileColumns.MEDIA_TYPE,
+        MediaStore.Files.FileColumns.MIME_TYPE,
+        MediaStore.Files.FileColumns.TITLE,
+        Images.Media.BUCKET_DISPLAY_NAME,
+        Images.Media.DATE_TAKEN,
+        Images.Media.WIDTH,
+        Images.Media.HEIGHT,
+        Images.Media.LONGITUDE,
+        Images.Media.LATITUDE
       };
     } else {
       PROJECTION = new String[] {
-          Images.Media._ID,
-          Images.Media.MIME_TYPE,
-          Images.Media.BUCKET_DISPLAY_NAME,
-          Images.Media.DATE_TAKEN,
-          Images.Media.LONGITUDE,
-          Images.Media.LATITUDE
+        MediaStore.Files.FileColumns._ID,
+        MediaStore.Files.FileColumns.DATA,
+        MediaStore.Files.FileColumns.DATE_ADDED,
+        MediaStore.Files.FileColumns.MEDIA_TYPE,
+        MediaStore.Files.FileColumns.MIME_TYPE,
+        MediaStore.Files.FileColumns.TITLE,
+        Images.Media.BUCKET_DISPLAY_NAME,
+        Images.Media.DATE_TAKEN,
+        Images.Media.LONGITUDE,
+        Images.Media.LATITUDE
       };
     }
   }
@@ -304,7 +312,7 @@ public class CameraRollManager extends ReactContextBaseJavaModule {
                 Images.Media.EXTERNAL_CONTENT_URI;
 
         Cursor photos = resolver.query(
-            assetURI,
+            MediaStore.Files.getContentUri("external"),
             PROJECTION,
             selection.toString(),
             selectionArgs.toArray(new String[selectionArgs.size()]),
